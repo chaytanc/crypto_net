@@ -192,6 +192,30 @@ class Data_Processor():
 			labels.append(label)
 		return labels
 
+	def map_indices(self, volumes):
+		'''
+		This maps a one dimensional index as the key and the 
+		corresponding two dimensional indices as the value.
+		See the tests for examples.
+		'''
+		mapp = {}
+		# mapp_index will increment once every time a entry is made, mapping 
+		# every element of lists within volumes to a different dict index
+		mapp_index = 0
+		for lst_ind, lst in enumerate(volumes):
+			for num_ind, num in enumerate(lst):
+				mapp[mapp_index] = (lst_ind, num_ind)
+				mapp_index += 1
+		return mapp	
+
+	def get_length(self, volumes):
+		''' This function gets the the total elements of a 2d array. '''
+		total_length = 0
+		for comp in volumes:
+			for volume in comp:
+				total_length += 1	
+		return total_length
+
 	def see_data(self, volumes, out_path=None):
 		try:
 			volumes.to_csv(out_path)
@@ -211,40 +235,28 @@ class Data_Processor():
 		#XXX may not want to return vols here
 		return volumes
 		
-#XXX Override Dataset
-
 class Data(Dataset):
 	def __init__(self):
-		#get volumes
-		self.volumes = Data_Processor('./all_currencies.csv').main()
-		# put in a tensor
-		# use tensor for overriding __getitem__ and __len__
-		#XXX need to resolve how to separate by company when batching by 95
+		self.dp = Data_Processor('./all_currencies.csv')
+		self.volumes = self.dp.main()
+		self.mapp = self.dp.map_indices(self.volumes) 
 
 	def __len__(self):
-		length = len(self.volumes)
+		length = self.dp.get_length(self.volumes)
 		return length
 
-	#XXX write a test!
 	def __getitem__(self, ind):
-		# This loop is designed to ensure that data from different companies are
-		# never included in the same batch. Also that every input to the next is
-		# complete with at least
-		i = 0
-		for company in self.volumes:
-			length = len(company)
-			if i > length - 101:
-				# continues to next company in the loop w/out executing the rest
-				continue
-			item = company[ind]
-			i += 1
+		lst_ind, num_ind = self.mapp[ind]
+		# item is the volume of a cryptocurrency stock at a given index
+		item = self.volumes[lst_ind][num_ind]
 		return item
 
 def get_data(data, labels):
+	train_data = Data()
+	test_data = 
 
-	#train_loader = torch.utils.data.DataLoader(dataset=
-	#test_loader = torch.utils.data.DataLoader(dataset
-	pass
+	train_loader = DataLoader(dataset=train_data, batch_size=95, shuffle=True)
+	test_loader = DataLoader(dataset=test_data, batch_size=95, shuffle=True)
 		
 class Crypto_Net(nn.Module):
 	def __init__(self, n_input, n_hidden, n_output):

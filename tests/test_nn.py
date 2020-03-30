@@ -7,7 +7,7 @@ import torch
 import pandas
 import unittest
 import sys
-sys.path.append('../lib')
+sys.path.append('../docs')
 import nn
 
 class Test_NN(unittest.TestCase):
@@ -37,8 +37,6 @@ class Test_NN(unittest.TestCase):
 
 	def test_clean_data_300(self):
 		fake_volumes = [[0, 1, 2, 3], [4, 5], [6, 7, 8]]
-		#XXX see_data not working
-		#self.dp.see_data(fake_volumes)
 		batch_and_label_size = 3
 		cleaned = self.dp.clean_data(fake_volumes, batch_and_label_size)
 		print('CLEANED: {}'.format(cleaned))
@@ -55,6 +53,18 @@ class Test_NN(unittest.TestCase):
 		self.dp.log.debug("LABELS: {}".format(labels))
 		assert(labels == [[2], [8]])
 		assert(fake_volumes == [[0, 1], [6, 7]])
+
+	def test_map_indices_500(self):
+		fake_volumes = [[10, 11], [12]]
+		mapp = self.dp.map_indices(fake_volumes)
+		assert(mapp == {0:(0, 0), 1:(0, 1), 2:(1, 0)})
+		lst_ind, num_ind = mapp[1]
+		assert(lst_ind == 0 and num_ind == 1)
+
+	def test_get_length_600(self):
+		fake_volumes = [[10, 11], [12]]
+		length = self.dp.get_length(fake_volumes)
+		assert(length == 3)
 		
 	def tearDown(self):
 		pass
