@@ -8,14 +8,6 @@
 # Info about __name__: 
 # https://www.freecodecamp.org/news/whats-in-a-python-s-name-506262fe61e8/
 
-import torch
-from torch import nn, optim
-from torch.utils.data import Dataset, DataLoader
-import pandas as pd
-from matplotlib import pyplot as plt
-import os
-import logging
-
 # Purpose: Write a neural network to predict cryptocurr total stock volume
 #   after 3-6 months based on past volumes
 #Psuedo-code
@@ -29,6 +21,13 @@ import logging
 # Train
 # Test
 
+import torch
+from torch import nn, optim
+from torch.utils.data import Dataset, DataLoader
+import pandas as pd
+from matplotlib import pyplot as plt
+import os
+import logging
 
 #NOTE: Normally I would put all these classes/larger objects in separate
 # files but for the purposes of turning this in as a copy/paste, I did not.
@@ -165,33 +164,126 @@ class Data_Processor():
 
 	#XXX IT IS MISLEADING to only return labels since it ALSO changes volumes
 	# (passed by reference)
+	#XXX this algorithm doesn't work because it alters the list it iterates over
 	def label_data(self, volumes, batch_and_label_size, label_size):
 		''' Volumes will be passed in the format which has been separated by
 		company into lists which are all evenly divisible by 100. 
 		***volumes is also modified by this function***
 		'''
+		# make list of lable indices that we will delete from
+		ind_to_delete = []
 		# make labels list
 		labels = []
 		# Iterate through companies
-		for company in volumes:
+		for lst, company in enumerate(volumes):
 			# make individual label for the comp
 			label = []
-			# Iterate through every 100 rows
-			for i, data in enumerate(company):
+			# Iterate through rows
+			for row, data in enumerate(company):
 				# batch and label size is 100 in my case
 				# If it is the 100th item (99th index) it will use remove 
 				# label_size amount of indices from the end and append them to
 				# label which will append to labels
-				if ((i + 1) % batch_and_label_size) == 0:
+				self.log.debug("ROW DATA: {}".format(data))
+				if ((row + 1) % batch_and_label_size) == 0:
 					for each in range(label_size):
 						# Fill labels list with last five datapoints of that 100
 						label.append(data)	
-						# Delete those last five indices from the list	
-						del company[i - each]
+						ind_to_delete.append((lst, row - each))
 			# Append the ind comp label list to the labels list
 			labels.append(label)
+
+		# Need to sort it so that we delete the larger indices FIRST so that
+		# the order of the other indices is not screwed up as we delete
+		for lst, row in sorted(ind_to_delete, reverse=True):
+			# Delete label indices from the volumes
+			del volumes[lst][row]
+
 		return labels
 
+	# Need to get a list of 95 volumes, turn it to a tensor and pass it into
+	# model as a param so that it goes through forward
+	def get_samples(self, 2darray, size):
+		samples = []
+		sample = []
+		for lst, company in enumerate(2darray):
+			for row, data in enumerate(company):
+				self.log.debug("ROW DATA: {}".format(data))
+				if ((row + 1) % size) == 0:
+					sample.append(data)
+			#XXX need to make into tensors AFTER separating to train/test
+			#tensor = torch.Tensor(
+				#sample, requires_grad=True, dtype=torch.float32)
+			#samples.append(tensor)
+			samples.append(sample)
+		return samples
+
+	#XXX need to shorten this function and test it
+	def get_train_test_samples(self, samples, labels, train_fraction):
+		'''
+		Args:
+			samples: format returned by get_samples()
+				Ex: [[1, 2, 3], [4, 5, 6]] if the input tensor size is 3. 
+			labels: format returned by label_data()
+				Ex: [[16], [10]] if the label_size is 1
+			train_fraction: must be a fraction of one representing the percent
+				of the data which will be used for training. 
+				Ex: .8 = 80% training data, 20% testing.
+		'''
+		train_test_samples = {}
+		n_samples = len(samples)
+		samples_inds = list(enumerate(samples))
+		# Divide into x% train, x% test
+		n_train = int(n_samples * train_fraction)
+		n_test = int(n_samples * (1 - train_fraction))
+		train_samples = []
+		train_labels = []
+		test_samples = []
+		test_labels = []
+		# Randomly sample n training samples and n test samples
+		# train_ind = [(ind, val)] format
+		train_set = random.sample(samples_inds, n_train)
+		train_inds = [train_ind for train_ind, train in train_set]
+		# test_ind is whatever train_inds aren't
+		#test_inds = [ind for ind, sample in enumerate(samples), 
+		#	if ind not in train_inds]
+		for ind, sample in enumerate(samples):
+			if ind not in train_inds:
+				test_inds.append[ind]
+
+		for i, sample, label in enumerate(zip(samples, labels)):
+			# Get ind of the sample we want to use in train_samples
+			
+			ti = train_inds[i]
+			testi = test_inds[i]
+			# append the value of that ind into train_samples
+			train_samples.append(samples[ti])
+			train_labels.append(labels[ti])
+			test_samples.append(samples[testi])
+			test_labels.append(labels[testi])
+
+		tr_samples = self.to_tensor(train_samples)
+		tr_labels = self.to_tensor(train_labels)
+		te_samples = self.to_tensor(test_samples)
+		te_labels = self.to_tensor(test_labels)
+
+		train_test_samples['train_samples'] = tr_samples
+		train_test_samples['train_labels'] = tr_labels
+		train_test_samples['test_samples'] = te_samples
+		train_test_samples['test_labels'] = te_labels
+		return train_test_samples
+
+	#XXX test
+	def to_tensor(self, array):
+		new_array = []
+		for sample in array:
+			# Check if index of samples is one of the indices in train_inds
+			tensor = torch.Tensor(
+				sample, requires_grad=True, dtype=torch.float32)
+			new_array.append(tensor)
+		return new_array
+
+	
 	def map_indices(self, volumes):
 		'''
 		This maps a one dimensional index as the key and the 
@@ -235,29 +327,6 @@ class Data_Processor():
 		#XXX may not want to return vols here
 		return volumes
 		
-class Data(Dataset):
-	def __init__(self):
-		self.dp = Data_Processor('./all_currencies.csv')
-		self.volumes = self.dp.main()
-		self.mapp = self.dp.map_indices(self.volumes) 
-
-	def __len__(self):
-		length = self.dp.get_length(self.volumes)
-		return length
-
-	def __getitem__(self, ind):
-		lst_ind, num_ind = self.mapp[ind]
-		# item is the volume of a cryptocurrency stock at a given index
-		item = self.volumes[lst_ind][num_ind]
-		return item
-
-def get_data(data, labels):
-	train_data = Data()
-	test_data = 
-
-	train_loader = DataLoader(dataset=train_data, batch_size=95, shuffle=True)
-	test_loader = DataLoader(dataset=test_data, batch_size=95, shuffle=True)
-		
 class Crypto_Net(nn.Module):
 	def __init__(self, n_input, n_hidden, n_output):
 		# Very important to super so you can override forward later
@@ -283,31 +352,42 @@ p = {'n_input' : 95, 'n_hidden' : 20, 'n_output' : 5,
 	'lr' : 0.001, 'epochs' : 5
 	}
 
+dp = Data_Processor('./all_currencies.csv')
+df = dp.get_df()
+#XXX put in parameters dict?
+sample_and_label_size = 100
+sample_size = 95
+label_size = 5
+seg_data = dp.get_segmented_data(df)
+volumes = dp.get_volumes(seg_data)
+cleaned_vols = dp.clean_data(volumes, sample_and_label_size)
+labels = dp.label_data(cleaned_vols, sample_and_label_size, label_size)
+samples = dp.get_samples(cleaned_vols, sample_size)
+#train_samples = 
+#train_labels = 
+#test_samples = 
+#test_labels = 
+
 # Constructs layers, weights, biases, activation funcs etc...
 model = Crypto_Net(p['n_input'], p['n_hidden'], p['n_output'])
-# This is the loss function
+# Loss func and method of gradient descent
 criterion = nn.MSELoss()
 optimizer = torch.optim.SGD(model.parameters(), lr = p['lr'])
 
-def train(p, model, criterion, optimizer, train_loader):
+def train(p, model, criterion, optimizer, samples, labels):
 	'''
 	Args:
 		p: dict containing params subject to change like epoch number
 		model: made in Crypto_Net, architechture/neurons to pass data through
 		criterion: this is a loss function; the type of error calculation
 		optimizer: this is the type of gradient descent (ie stochastic...)
-		train_loader: training data as loaded by pytorch
 	NOTE: criterion, optimizer, train_loader all are pytorch objects
 	'''
 	# epoch is one full pass through dataset
 	for epoch in range(p['epochs']):
-		# data represents company volumes
-		#XXX should def print train_loader to understand how it shapes the data
-		#XXX experiment
-		#for i, (data, target) in enumerate(train_loader):
-		for data, target in train_loader:
+		for sample, target in zip(samples, labels):
 			# Forward pass for each batch of volumes stored in train_loader
-			model_output = model(data)
+			model_output = model(sample)
 			loss = criterion(model_output, target)
 			# Backpropagation of error
 			optimizer.zero_grad()
@@ -320,27 +400,26 @@ def train(p, model, criterion, optimizer, train_loader):
 				print ('Epoch [{}/{}], Step [{}/{}], Loss: {:.4f}'.format(
 					epoch+1, num_epochs, i+1, total_step, loss.item()))
 
-def test(p, test_loader):
+def test(p, test_samples, test_labels):
 	'''
 	This func gets runs some unused data through and shows the average error.
 	Args:
-		test_loader: pytorch object for testing data
 	'''
 	i = 0
-	j = 0
+	every_fifth_i = 0
 	total_error = 0
 	# No gradient computed for testing since we aren't updating weights
 	with torch.no_grad():
-		for data, target in test_loader:
+		for sample, label in zip(samples, labels):
 			model_output = model(data)
 			if (i + 1) % 5:
 				error = get_accuracy(model_output, target)
 				total_error += error
-				avg_acc = get_avg_acc(total_error, j)
+				avg_acc = get_avg_acc(total_error, every_fifth_i)
 				print('AVERAGE NETWORK ERROR, in dollars: {}'.format(avg_acc))
-				j += 1
+				every_fifth_i += 1
 			i += 1
-			
+
 def get_accuracy(model_output, target):
 	error = model_output - target
 	return error
@@ -349,6 +428,83 @@ def get_avg_acc(total_error, i):
 	average_error = total_error / (i + 1)
 	return average_error
 
+#---------------------Other method of loading data---------------------
+#class Data(Dataset):
+#	def __init__(self):
+#		self.dp = Data_Processor('./all_currencies.csv')
+#		self.volumes = self.dp.main()
+#		self.mapp = self.dp.map_indices(self.volumes) 
+#
+#	def __len__(self):
+#		length = self.dp.get_length(self.volumes)
+#		return length
+#
+#	def __getitem__(self, ind):
+#		lst_ind, num_ind = self.mapp[ind]
+#		# item is the volume of a cryptocurrency stock at a given index
+#		item = self.volumes[lst_ind][num_ind]
+#		return item, label
+#
+#def get_data(data, labels):
+#	#train_data = Data()
+#	#test_data = 
+#
+#	train_loader = DataLoader(dataset=train_data, batch_size=95, shuffle=True)
+#	test_loader = DataLoader(dataset=test_data, batch_size=95, shuffle=True)
+		
+#XXX train function if using Dataset and train_loader etc
+#def train(p, model, criterion, optimizer, train_loader):
+#	'''
+#	Args:
+#		p: dict containing params subject to change like epoch number
+#		model: made in Crypto_Net, architechture/neurons to pass data through
+#		criterion: this is a loss function; the type of error calculation
+#		optimizer: this is the type of gradient descent (ie stochastic...)
+#		train_loader: training data as loaded by pytorch
+#	NOTE: criterion, optimizer, train_loader all are pytorch objects
+#	'''
+#	# epoch is one full pass through dataset
+#	for epoch in range(p['epochs']):
+#		# data represents company volumes
+#		#XXX should def print train_loader to understand how it shapes the data
+#		#XXX experiment
+#		#for i, (data, target) in enumerate(train_loader):
+#		for data, target in train_loader:
+#			# Forward pass for each batch of volumes stored in train_loader
+#			model_output = model(data)
+#			loss = criterion(model_output, target)
+#			# Backpropagation of error
+#			optimizer.zero_grad()
+#			# computes new grad
+#			loss.backward()
+#			# update weights
+#			optimizer.step()
+#
+#			if (i+1) % 100 == 0:
+#				print ('Epoch [{}/{}], Step [{}/{}], Loss: {:.4f}'.format(
+#					epoch+1, num_epochs, i+1, total_step, loss.item()))
+#
+#def test(p, test_loader):
+#	'''
+#	This func gets runs some unused data through and shows the average error.
+#	Args:
+#		test_loader: pytorch object for testing data
+#	'''
+#	i = 0
+#	j = 0
+#	total_error = 0
+#	# No gradient computed for testing since we aren't updating weights
+#	with torch.no_grad():
+#		for data, target in test_loader:
+#			model_output = model(data)
+#			if (i + 1) % 5:
+#				error = get_accuracy(model_output, target)
+#				total_error += error
+#				avg_acc = get_avg_acc(total_error, j)
+#				print('AVERAGE NETWORK ERROR, in dollars: {}'.format(avg_acc))
+#				j += 1
+#			i += 1
+			
 			
 #def initialize():
 #	#XXX random numbers of nodes right now,
