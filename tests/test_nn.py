@@ -8,12 +8,15 @@ import pandas
 import unittest
 import sys
 sys.path.append('../docs')
+import data_processor
 import nn
+import logging
 
 class Test_NN(unittest.TestCase):
 
 	def setUp(self):
-		self.dp = nn.Data_Processor('./test_data.csv')
+		self.dp = data_processor.Data_Processor(
+			'./test_data.csv', logging.DEBUG)
 		self.df = self.dp.get_df()
 
 	def test_get_segmented_data_100(self):
@@ -39,7 +42,6 @@ class Test_NN(unittest.TestCase):
 		fake_volumes = [[0, 1, 2, 3], [4, 5], [6, 7, 8, 9, 10, 11]]
 		sample_and_label_size = 3
 		cleaned = self.dp.clean_data(fake_volumes, sample_and_label_size)
-		print('CLEANED: {}'.format(cleaned))
 		assert(cleaned == [[0, 1, 2,], [6, 7, 8, 9, 10, 11]])
 
 	def test_label_data_400(self):
@@ -50,8 +52,6 @@ class Test_NN(unittest.TestCase):
 		cleaned = self.dp.clean_data(fake_volumes, sample_and_label_size)
 		labels = self.dp.label_data(
 			fake_volumes, sample_and_label_size, label_size)
-		self.dp.log.debug("LABELS: {}".format(labels))
-		self.dp.log.debug("VOLUMES: {}".format(fake_volumes))
 		assert(labels == [[2], [8, 11]])
 		assert(fake_volumes == [[0, 1], [6, 7, 9, 10]])
 
@@ -71,10 +71,15 @@ class Test_NN(unittest.TestCase):
 		# assert that there is the correct ratio of training data to labels
 		pass
 
-	#XXX
 	def test_get_samples_800(self):
-		pass
+		fake_data = [[0, 1], [2], [3, 4, 5]]	
+		size = 1
+		samples = self.dp.get_samples(fake_data, size)	
+		self.dp.log.debug("SAMPLES TEST: {}".format(samples))
+		assert(samples == [[0], [1], [2], [3], [4], [5]])
 
+	#XXX Make fake_data be processed already rather than calling 
+	# the processing funcs
 	def test_get_train_test_samples_900(self):
 		fake_volumes = [[0, 1, 2, 3], [4, 5], [6, 7, 8, 9, 10]]
 		sample_and_label_size = 2
@@ -83,14 +88,22 @@ class Test_NN(unittest.TestCase):
 		cleaned = self.dp.clean_data(fake_volumes, sample_and_label_size)
 		labels = self.dp.label_data(
 			fake_volumes, sample_and_label_size, label_size)
-		# Labels will look like: [[1, 3], [5], [7, 9]]
-		# Samples now looks like: [[0, 2], [4], [6, 8]]
-		#XXX turning data to tensor should happen AFTER separation
-		#samples_tensor = self.dp.get_samples(cleaned, 1)
-		#labels_tensor = self.dp.get_samples(labels, 1)
+		assert(labels == [[1, 3], [5], [7, 9]])
+		# Labels will look like:  [[1, 3], [5], [7, 9]]
+		# Cleaned now looks like: [[0, 2], [4], [6, 8]]
+		labels_samples = self.dp.get_samples(labels, 1)
+		assert(labels_samples == [[1], [3], [5], [7], [9]])
+		samples = self.dp.get_samples(cleaned, 1)
+		# Labels now looks like:  [[1], [3], [5], [7], [9]]
+		# Samples now looks like: [[0], [2], [4], [6], [8]]
 		# .6 should use  2/3 of samples for training
-		samples_dict = self.dp.get_train_test_samples(samples, labels, .6)
-		assert(samples_dict == {'train_samples' : [
+		samples_dict = self.dp.get_train_test_samples(
+			samples, labels_samples, .6)
+		self.dp.log.debug("SAMPLES_DICT TEST: {}".format(samples_dict))
+		assert(len(samples_dict['train_samples']) == 3)
+		assert(len(samples_dict['train_labels']) == 3)
+		assert(len(samples_dict['test_samples']) == 2)
+		assert(len(samples_dict['test_labels']) == 2)
 
 	def tearDown(self):
 		pass
