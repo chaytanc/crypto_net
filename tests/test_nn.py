@@ -11,6 +11,15 @@ sys.path.append('../docs')
 import data_processor
 import nn
 import logging
+import start
+
+def setup_logger(logger_level):
+	''' Args: logger supports levels DEBUG, INFO, WARNING, ERROR, CRITICAL.
+	logger_level should be passed in in the format logging.LEVEL '''
+
+	logging.basicConfig(level=logger_level)
+	logger = logging.getLogger(__name__)
+	return logger
 
 class Test_NN(unittest.TestCase):
 
@@ -18,6 +27,7 @@ class Test_NN(unittest.TestCase):
 		self.dp = data_processor.Data_Processor(
 			'./test_data.csv', logging.DEBUG)
 		self.df = self.dp.get_df()
+		self.log = setup_logger(logging.DEBUG)
 
 	def test_get_segmented_data_100(self):
 		''' 
@@ -75,7 +85,7 @@ class Test_NN(unittest.TestCase):
 		fake_data = [[0, 1], [2], [3, 4, 5]]	
 		size = 1
 		samples = self.dp.get_samples(fake_data, size)	
-		self.dp.log.debug("SAMPLES TEST: {}".format(samples))
+		self.log.debug("SAMPLES TEST: {}".format(samples))
 		assert(samples == [[0], [1], [2], [3], [4], [5]])
 
 	#XXX Make fake_data be processed already rather than calling 
@@ -99,12 +109,74 @@ class Test_NN(unittest.TestCase):
 		# .6 should use  2/3 of samples for training
 		samples_dict = self.dp.get_train_test_samples(
 			samples, labels_samples, .6)
-		self.dp.log.debug("SAMPLES_DICT TEST: {}".format(samples_dict))
+		self.log.debug("SAMPLES_DICT TEST: {}".format(samples_dict))
 		assert(len(samples_dict['train_samples']) == 3)
 		assert(len(samples_dict['train_labels']) == 3)
 		assert(len(samples_dict['test_samples']) == 2)
 		assert(len(samples_dict['test_labels']) == 2)
 
+	def test_train_1000(self):
+		fake_samples = [[0, 1, 2], [4, 5, 6]]
+		fake_labels = [[3], [7]] 
+		samples_dict = self.dp.get_train_test_samples(
+			fake_samples, fake_labels, 1)	
+		fake_p = {'n_input' : 3, 'n_hidden' : 20, 'n_output' : 1, 
+			'lr' : 0.001, 'epochs' : 25, 'sample_and_label_size' : 4, 
+			'label_size' : 1, 'sample_size' : 3, 'train_fraction' : 1
+		}
+		
+		model = nn.Crypto_Net(
+			fake_p['n_input'], fake_p['n_hidden'], fake_p['n_output'])
+		criterion = torch.nn.MSELoss()
+		optimizer = torch.optim.SGD(model.parameters(), lr = fake_p['lr'])
+		train_samples = samples_dict['train_samples']
+		train_labels = samples_dict['train_labels']
+
+		try:
+			start.train(
+				fake_p, model, criterion, optimizer, 
+				train_samples, train_labels
+				)
+			# Success!
+			self.log.debug("TRAIN SUCCESS!")
+			status = True
+			assert(True)
+		except Exception as e:
+			self.log.debug("ERROR: {}".format(e))
+			status = False
+			assert(False)
+
+		return status
+
+	def test_test_1100(self):
+		fake_samples = [[10, 11, 12], [14, 15, 16]]
+		fake_labels = [[13], [17]] 
+		fake_p = {'n_input' : 3, 'n_hidden' : 20, 'n_output' : 1, 
+			'lr' : 0.001, 'epochs' : 25, 'sample_and_label_size' : 4, 
+			'label_size' : 1, 'sample_size' : 3, 'train_fraction' : 0
+		}
+		model = nn.Crypto_Net(
+			fake_p['n_input'], fake_p['n_hidden'], fake_p['n_output'])
+		criterion = torch.nn.MSELoss()
+		samples_dict = self.dp.get_train_test_samples(
+			fake_samples, fake_labels, fake_p['train_fraction'])	
+		test_samples = samples_dict['test_samples']
+		test_labels = samples_dict['test_labels']
+
+		try:
+			start.test(fake_p, model, criterion, test_samples, test_labels)
+			self.log.debug("TEST SUCCESS!")
+			status = True
+			assert(True)
+
+		except Exception as e:
+			self.log.debug("ERROR: {}".format(e))
+			status = False
+			assert(False)
+
+		return status
+
+			
 	def tearDown(self):
 		pass
 		

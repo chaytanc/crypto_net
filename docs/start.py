@@ -3,29 +3,39 @@
 from nn import Crypto_Net
 from data_processor import Data_Processor
 import torch
+import torch.nn, torch.optim
 from torch.utils.data import DataLoader, Dataset
 from parameters import p
 import logging
-
-data_path = './all_currencies.csv'
-logging_level = logging.INFO
-dp = Data_Processor(data_path, logging_level)
-samples_dict = dp.main(
-	p['sample_and_label_size'], p['label_size'], 
-	p['sample_size'], p['train_fraction'])
-train_samples = samples_dict['train_samples']
-train_labels = samples_dict['train_labels']
-test_samples = samples_dict['test_samples']
-test_labels = samples_dict['test_labels']
 
 # Constructs layers, weights, biases, activation funcs etc...
 model = Crypto_Net(p['n_input'], p['n_hidden'], p['n_output'])
 
 # Loss func and method of gradient descent
-criterion = nn.MSELoss()
+criterion = torch.nn.MSELoss()
 optimizer = torch.optim.SGD(model.parameters(), lr = p['lr'])
 
-#XXX test!!!
+def setup_logger(logging_level):
+	''' Args: logger supports levels DEBUG, INFO, WARNING, ERROR, CRITICAL.
+	logger_level should be passed in in the format logging.LEVEL '''
+
+	logging.basicConfig(level=logging_level)
+	logger = logging.getLogger(__name__)
+	return logger
+log = setup_logger(logging.DEBUG)
+ 
+def initialize():
+	data_path = './all_currencies.csv'
+	logging_level = logging.INFO
+	dp = Data_Processor(data_path, logging_level)
+	samples_dict = dp.main(
+		p['sample_and_label_size'], p['label_size'], 
+		p['sample_size'], p['train_fraction'])
+	train_samples = samples_dict['train_samples']
+	train_labels = samples_dict['train_labels']
+	test_samples = samples_dict['test_samples']
+	test_labels = samples_dict['test_labels']
+
 def train(p, model, criterion, optimizer, samples, labels):
 	'''
 	Args:
@@ -37,7 +47,7 @@ def train(p, model, criterion, optimizer, samples, labels):
 	'''
 	# epoch is one full pass through dataset
 	for epoch in range(p['epochs']):
-		for sample, target in zip(samples, labels):
+		for i, (sample, target) in enumerate(zip(samples, labels)):
 			# Forward pass for each batch of volumes stored in train_loader
 			model_output = model(sample)
 			loss = criterion(model_output, target)
@@ -47,12 +57,21 @@ def train(p, model, criterion, optimizer, samples, labels):
 			loss.backward()
 			# update weights
 			optimizer.step()
+			log.debug('Epoch [{}/{}], Step [{}/{}], Loss: {:.4f}'
+				.format(
+					epoch+1, p['epochs'], 
+					i+1, len(samples), loss.item()
+			))
 
+			#XXX mess w/ the 100 param to print sufficiently, make a hyperparam
 			if (i+1) % 100 == 0:
-				print ('Epoch [{}/{}], Step [{}/{}], Loss: {:.4f}'.format(
-					epoch+1, num_epochs, i+1, total_step, loss.item()))
+				log.info('Epoch [{}/{}], Step [{}/{}], Loss: {:.4f}'
+					.format(
+						epoch+1, p['epochs'], 
+						i+1, len(samples), loss.item()
+				))
 
-def test(p, test_samples, test_labels):
+def test(p, model, criterion, test_samples, test_labels):
 	'''
 	This func gets runs some unused data through and shows the average error.
 	Args:
@@ -62,13 +81,27 @@ def test(p, test_samples, test_labels):
 	total_error = 0
 	# No gradient computed for testing since we aren't updating weights
 	with torch.no_grad():
-		for sample, label in zip(samples, labels):
-			model_output = model(data)
+		for sample, label in zip(test_samples, test_labels):
+			model_output = model(sample)
+			loss = criterion(model_output, label)
+			log.debug(
+				'Step [{}/{}], ' +\
+				'Loss: {:.4f}'
+				.format(
+					i+1, len(test_samples), loss.item()
+				)
+			)
 			if (i + 1) % 5:
-				error = get_accuracy(model_output, target)
+				error = get_accuracy(model_output, label)
 				total_error += error
 				avg_acc = get_avg_acc(total_error, every_fifth_i)
-				print('AVERAGE NETWORK ERROR, in dollars: {}'.format(avg_acc))
+				log.info(
+					'Step [{}/{}], ' +\
+					'Loss: {:.4f}, Avg Accuracy: {}'
+					.format(
+						i+1, len(test_samples), loss.item(), avg_acc
+					)
+				)
 				every_fifth_i += 1
 			i += 1
 
@@ -81,6 +114,7 @@ def get_avg_acc(total_error, i):
 	return average_error
 
 if __name__ == "__main__":
+	initialize()
 	train(p, model, criterion, optimizer, train_samples, train_labels)
 	test(p, test_samples, test_labels)
 
