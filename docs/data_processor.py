@@ -30,8 +30,6 @@ import os
 import logging
 import random
 
-#NOTE: Normally I would put all these classes/larger objects in separate
-# files but for the purposes of turning this in as a copy/paste, I did not.
 def setup_logger(logger_level):
 	''' Args: logger supports levels DEBUG, INFO, WARNING, ERROR, CRITICAL.
 	logger_level should be passed in in the format logging.LEVEL '''
@@ -41,7 +39,6 @@ def setup_logger(logger_level):
 	# If the file/func was imported then the name would be nameScript
 	logger = logging.getLogger(__name__)
 	return logger
-
 
 class Data_Processor():
 	def __init__(self, data_path, logging_level):
@@ -152,16 +149,22 @@ class Data_Processor():
 		for i, company in enumerate(volumes):	
 			self.log.debug('COMPANY: {}'.format(company))
 			length = len(company)
-			# batch size is 95, labels use 5, so 100
+			# sample size is 95, labels use 5, so 100
 			remainder = length % sample_and_label_size
 			# subtract remainder number of volumes off company
 			del company[length - remainder : length]
 			self.log.debug('POST COMPANY: {}'.format(company))
 
+		inds_to_delete = []
+		for i, company in enumerate(volumes):	
 			# Removes any now empty/useless lists
 			new_len = len(company)
 			if new_len == 0:
-				del volumes[i]
+				inds_to_delete.append(i)
+
+		for ind in sorted(inds_to_delete, reverse=True):
+			del volumes[ind]
+
 		return volumes
 
 	#XXX IT IS MISLEADING to only return labels since it ALSO changes volumes
@@ -172,7 +175,7 @@ class Data_Processor():
 		***volumes is also modified by this function***
 		'''
 		# make list of lable indices that we will delete from
-		ind_to_delete = []
+		inds_to_delete = []
 		# make labels list
 		labels = []
 		# Iterate through companies
@@ -189,22 +192,26 @@ class Data_Processor():
 					for each in range(label_size):
 						# Fill labels list with last five datapoints of that 100
 						label.append(data)	
-						ind_to_delete.append((lst, row - each))
+						inds_to_delete.append((lst, row - each))
 			# Append the ind comp label list to the labels list
 			labels.append(label)
 
 		# Need to sort it so that we delete the larger indices FIRST so that
 		# the order of the other indices is not screwed up as we delete
-		for lst, row in sorted(ind_to_delete, reverse=True):
+		for lst, row in sorted(inds_to_delete, reverse=True):
 			# Delete label indices from the volumes
 			del volumes[lst][row]
 
+		assert(len(volumes) == len(labels))
 		return labels
 
 	# Need to get a list of 95 volumes, turn it to a tensor and pass it into
 	# model as a param so that it goes through forward
 	def get_samples(self, two_d_array, size):
 		''' 
+		This basically just resizes an array to a 2d array with elements 
+		of a given size.
+
 		Args:
 			two_d_array: any list with two dims, i.e. [[4], [1, 2]]
 			size: the size of the second dimension of two_d_array that you WANT
@@ -236,6 +243,7 @@ class Data_Processor():
 		train_test_samples = {}
 		n_samples = len(samples)
 		samples_inds = list(enumerate(samples))
+		self.log.debug("SAMPLES_INDS: {}".format(samples_inds))
 		# Divide into x% train, x% test
 		n_train = int(n_samples * train_fraction)
 		n_test = int(n_samples * (1 - train_fraction))
@@ -246,6 +254,7 @@ class Data_Processor():
 		# Randomly sample n training samples and n test samples
 		# train_ind = [(ind, val)] format
 		train_set = random.sample(samples_inds, n_train)
+		self.log.debug("TRAIN_SET: {}".format(train_set))
 		train_inds = [train_ind for train_ind, train in train_set]
 
 		# test_ind is whatever train_inds aren't
@@ -256,9 +265,15 @@ class Data_Processor():
 			if ind not in train_inds:
 				test_inds.append(ind)
 
+		#XXX FOR TESTING:
+		self.log.debug("LEN SAMPLES, LEN LABELS: {}, {}".format(
+			len(samples), len(labels)))
+		assert(len(samples) == len(labels))
+
 		self.log.debug("TRAIN_INDS: {}".format(train_inds))
 		self.log.debug("TEST_INDS: {}".format(test_inds))
 		for ind in train_inds:
+			self.log.debug("TRAIN IND: {}".format(ind))
 			train_samples.append(samples[ind])
 			train_labels.append(labels[ind])
 		
@@ -271,10 +286,14 @@ class Data_Processor():
 		te_samples = self.to_tensor(test_samples)
 		te_labels = self.to_tensor(test_labels)
 
+		tr_samples, tr_labels = self.delete_empty_labels(tr_samples, tr_labels)
+		te_samples, te_labels = self.delete_empty_labels(te_samples, te_labels)
+
 		train_test_samples['train_samples'] = tr_samples
 		train_test_samples['train_labels'] = tr_labels
 		train_test_samples['test_samples'] = te_samples
 		train_test_samples['test_labels'] = te_labels
+
 		return train_test_samples
 
 	def to_tensor(self, array):
@@ -286,6 +305,38 @@ class Data_Processor():
 			new_array.append(tensor)
 		return new_array
 
+	def delete_empty_labels(self, samples, labels):
+		''' Inputs must be tensors! '''
+		length = len(labels[0])
+		inds_to_delete = []
+		for i, label in enumerate(labels):
+			if all(torch.isnan(label)):
+				inds_to_delete.append(i)	
+	
+		for ind in sorted(inds_to_delete, reverse=True):
+			del samples[ind]
+			del labels[ind]
+		return (samples, labels)
+
+	#XXX
+	#def average_nans(self, samples, labels):
+	def average_nans(self, lst):
+		''' Input must be after labels w/ all nans were deleted. '''
+		df = pd.DataFrame(lst)	
+		df.fillna(df.mean()).astype(float)
+		lst = df.values.tolist()
+		#assert(isinstance(all(lst), float))
+		
+		for j, sample in enumerate(lst):
+			for i, sample_val in enumerate(sample):
+				if sample_val == float("NaN"):
+					import pdb; pdb.set_trace()
+					avg = sum(sample) / len(sample)
+					sample[i] = avg
+					#XXX Don't think that's necessary?
+					lst[j] = sample[sample]
+		return lst
+					
 	def map_indices(self, volumes):
 		'''
 		This maps a one dimensional index as the key and the 
@@ -321,10 +372,11 @@ class Data_Processor():
 		#plt.figure(table)
 		#plt.show(table)
 		#self.log.info(volumes.head())
-			
+				
 	# Chains together all the functions necessary to process the data
-	def main(self, 
-		sample_and_label_size, label_size, sample_size, train_fraction):
+	def main(
+		self, sample_and_label_size, label_size, 
+		sample_size, train_fraction):
 
 		df = self.get_df()
 		crypto_rows = self.get_segmented_data(df)
@@ -332,10 +384,14 @@ class Data_Processor():
 		cleaner_volumes = self.clean_data(volumes, sample_and_label_size)
 		labels = self.label_data(
 			cleaner_volumes, sample_and_label_size, label_size)
+
 		labels_samples = self.get_samples(labels, label_size)
 		samples = self.get_samples(cleaner_volumes, sample_size)
+		labels_samp = self.average_nans(labels_samples)
+		samp = self.average_nans(samples)
 		samples_dict = self.get_train_test_samples(
-			samples, labels_samples, train_fraction)
+			samp, labels_samp, train_fraction)
+		import pdb; pdb.set_trace()
 		return samples_dict
 		
 #--------------------------------------MOVED TO OTHER FILES---------------------

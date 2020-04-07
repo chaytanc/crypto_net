@@ -14,7 +14,7 @@ class Crypto_Net(nn.Module):
 			# Layers 1 and 2 with 95 inputs, 20 outputs
 			nn.Linear(n_input, n_hidden),
 			# Activation function
-			nn.ReLU(),
+			nn.LeakyReLU(),
 			# Layers 2 and 3 with 20 inputs 5 outputs
 			nn.Linear(n_hidden, n_output)
 			)
