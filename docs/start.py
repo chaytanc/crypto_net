@@ -8,24 +8,43 @@ import torch.nn, torch.optim
 from torch.utils.data import DataLoader, Dataset
 from parameters import p
 import logging
+import sys
 
 # Constructs layers, weights, biases, activation funcs etc...
-model = Crypto_Net(p['n_input'], p['n_hidden'], p['n_output'])
+if p['type'] == 'simple':
+	model = Crypto_Net(p['n_input'], p['n_output'], p['n_hidden1'])
+else:
+	model = Crypto_Net(
+		p['n_input'], p['n_output'], 
+		p['n_hidden1'], p['n_hidden2'], p['n_hidden3'], p['n_hidden4']
+		)
 
 # Loss func and method of gradient descent
-#criterion = torch.nn.MSELoss()
-criterion = torch.nn.L1Loss()
-optimizer = torch.optim.SGD(model.parameters(), lr = p['lr'])
+criterion = torch.nn.MSELoss()
+optimizer = torch.optim.Adam(model.parameters(), lr = p['lr'])
 
-def setup_logger(logging_level):
+def setup_logger(logging_level, log_file):
 	''' Args: logger supports levels DEBUG, INFO, WARNING, ERROR, CRITICAL.
 	logger_level should be passed in in the format logging.LEVEL '''
+#	logger = logging.getLogger(__name__)
+#	c_handler = logging.StreamHandler(stream = sys.stdout)
+#	f_handler = logging.FileHandler(log_file, mode = 'w')
+#	c_format = logging.Formatter('%(levelname)s - %(funcName)s: %(message)s')
+#	f_format = logging.Formatter(
+#		'%(asctime)s - %(funcName)s - %(filename)s: %(message)s')
+#	c_handler.setFormatter(c_format)
+#	f_handler.setFormatter(f_format)
+#	c_handler.setLevel(logging_level)
+#	f_handler.setLevel(logging_level)
+#	logger.addHandler(c_handler)
+#	logger.addHandler(f_handler)
+#	logger.setLevel(logging_level)
 
-	logging.basicConfig(level=logging_level)
+	logging.basicConfig(level = logging_level)
 	logger = logging.getLogger(__name__)
 	return logger
  
-log = setup_logger(logging.DEBUG)
+log = setup_logger(logging.DEBUG, p['log_file'])
 
 #---------------------Other method of loading data---------------------
 class Data(Dataset):
@@ -73,16 +92,10 @@ def train(p, model, criterion, optimizer, train_loader):
 				# Backpropagation of error
 				optimizer.zero_grad()
 				# computes new grad
-				loss.backward(retain_graph=True)
+				loss.backward()
 				# update weights
 				optimizer.step()
-	#			log.debug('Epoch [{}/{}], Step [{}/{}], Loss: {:.4f}'
-	#				.format(
-	#					epoch+1, p['epochs'], 
-	#					i+1, len(train_loader), loss.item()
-	#			))
 
-				#import pdb; pdb.set_trace()
 				#XXX mess w/ the 100 param, make a hyperparam
 				if (i+1) % 100 == 0:
 					log.info('Epoch [{}/{}], Step [{}/{}], Loss: {:.4f}'
@@ -104,23 +117,14 @@ def test(p, model, criterion, test_loader):
 		for sample, label in test_loader:
 			model_output = model(sample)
 			loss = criterion(model_output, label)
-			log.debug(
-				'Step [{}/{}], ' +\
-				'Loss: {:.4f}'
-				.format(
-					i+1, len(test_loader), loss.item()
-				)
-			)
 			if (i + 1) % 5:
 				error = get_accuracy(model_output, label)
 				total_error += error
-				avg_acc = get_avg_acc(total_error, every_fifth_i)
+				avg_err = get_avg_error(total_error, every_fifth_i)
 				log.info(
-					'Step [{}/{}], ' +\
-					'Loss: {:.4f}, Avg Accuracy: {}'
-					.format(
-						i+1, len(test_loader), loss.item(), avg_acc
-					)
+					'Step [{}/{}], \n '.format(i+1, len(test_loader)) +\
+					'Loss: {:.4f}, \n Avg Error: {}'.format(
+						loss.item(), avg_err)
 				)
 				every_fifth_i += 1
 			i += 1
@@ -129,9 +133,13 @@ def get_accuracy(model_output, target):
 	error = model_output - target
 	return error
 
-def get_avg_acc(total_error, i):
+def get_avg_error(total_error, i):
 	average_error = total_error / (i + 1)
 	return average_error
+
+#def write_stats_to_file(self, output_filename, loss, i, avg_err):
+#	with open(output_filename, 'w') as f:
+#		pd.DataFrame(	
 
 if __name__ == "__main__":
 	data_path = './all_currencies.csv'
@@ -199,7 +207,7 @@ if __name__ == "__main__":
 #			if (i + 1) % 5:
 #				error = get_accuracy(model_output, label)
 #				total_error += error
-#				avg_acc = get_avg_acc(total_error, every_fifth_i)
+#				avg_acc = get_avg_error(total_error, every_fifth_i)
 #				log.info(
 #					'Step [{}/{}], ' +\
 #					'Loss: {:.4f}, Avg Accuracy: {}'
@@ -214,7 +222,7 @@ if __name__ == "__main__":
 #	error = model_output - target
 #	return error
 #
-#def get_avg_acc(total_error, i):
+#def get_avg_error(total_error, i):
 #	average_error = total_error / (i + 1)
 #	return average_error
 #
@@ -232,59 +240,4 @@ if __name__ == "__main__":
 #	train(p, model, criterion, optimizer, train_samples, train_labels)
 #	test(p, model, criterion, test_samples, test_labels)
 #
-
-
-#------------------------------------OLD----------------------------------
-#XXX train function if using Dataset and train_loader etc
-#def train(p, model, criterion, optimizer, train_loader):
-#	'''
-#	Args:
-#		p: dict containing params subject to change like epoch number
-#		model: made in Crypto_Net, architechture/neurons to pass data through
-#		criterion: this is a loss function; the type of error calculation
-#		optimizer: this is the type of gradient descent (ie stochastic...)
-#		train_loader: training data as loaded by pytorch
-#	NOTE: criterion, optimizer, train_loader all are pytorch objects
-#	'''
-#	# epoch is one full pass through dataset
-#	for epoch in range(p['epochs']):
-#		# data represents company volumes
-#		#XXX should def print train_loader to understand how it shapes the data
-#		#XXX experiment
-#		#for i, (data, target) in enumerate(train_loader):
-#		for data, target in train_loader:
-#			# Forward pass for each batch of volumes stored in train_loader
-#			model_output = model(data)
-#			loss = criterion(model_output, target)
-#			# Backpropagation of error
-#			optimizer.zero_grad()
-#			# computes new grad
-#			loss.backward()
-#			# update weights
-#			optimizer.step()
-#
-#			if (i+1) % 100 == 0:
-#				print ('Epoch [{}/{}], Step [{}/{}], Loss: {:.4f}'.format(
-#					epoch+1, num_epochs, i+1, total_step, loss.item()))
-#
-#def test(p, test_loader):
-#	'''
-#	This func gets runs some unused data through and shows the average error.
-#	Args:
-#		test_loader: pytorch object for testing data
-#	'''
-#	i = 0
-#	j = 0
-#	total_error = 0
-#	# No gradient computed for testing since we aren't updating weights
-#	with torch.no_grad():
-#		for data, target in test_loader:
-#			model_output = model(data)
-#			if (i + 1) % 5:
-#				error = get_accuracy(model_output, target)
-#				total_error += error
-#				avg_acc = get_avg_acc(total_error, j)
-#				print('AVERAGE NETWORK ERROR, in dollars: {}'.format(avg_acc))
-#				j += 1
-#			i += 1			
 

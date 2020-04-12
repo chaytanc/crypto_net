@@ -2,7 +2,6 @@
 
 # Sources: 
 #XXX pytorch documentation
-#XXX all imports
 # Dataset came from user taniaj on Kaggle.com:
 # https://www.kaggle.com/taniaj/cryptocurrency-market-history-coinmarketcap/version/9
 # Info about __name__: 
@@ -25,25 +24,44 @@ import torch
 from torch import nn, optim
 from torch.utils.data import Dataset, DataLoader
 import pandas as pd
+import numpy as np
 from matplotlib import pyplot as plt
 import os
 import logging
 import random
+import pickle
+from parameters import p
+import sys
+import math
 
-def setup_logger(logger_level):
+def setup_logger(logging_level, log_file):
 	''' Args: logger supports levels DEBUG, INFO, WARNING, ERROR, CRITICAL.
 	logger_level should be passed in in the format logging.LEVEL '''
 
-	logging.basicConfig(level=logger_level)
 	# __name__ describes how the script is called, which is currently __main__
 	# If the file/func was imported then the name would be nameScript
+#	logger = logging.getLogger(__name__)
+#	c_handler = logging.StreamHandler(stream = sys.stdout)
+#	f_handler = logging.FileHandler(log_file, mode = 'w')
+#	c_format = logging.Formatter('%(levelname)s - %(funcName)s: %(message)s')
+#	f_format = logging.Formatter(
+#		'%(asctime)s - %(funcName)s - %(filename)s: %(message)s')
+#	c_handler.setFormatter(c_format)
+#	f_handler.setFormatter(f_format)
+#	c_handler.setLevel(logging_level)
+#	f_handler.setLevel(logging_level)
+#	logger.addHandler(c_handler)
+#	logger.addHandler(f_handler)
+#	logger.setLevel(logging_level)
+
+	logging.basicConfig(level = logging_level)
 	logger = logging.getLogger(__name__)
 	return logger
 
 class Data_Processor():
 	def __init__(self, data_path, logging_level):
 		# logging_level format is, for example, logging.DEBUG
-		self.log = setup_logger(logging_level)
+		self.log = setup_logger(logging_level, p['log_file'])
 		self.data_path = data_path
 		
 	# Assumes the file all_currencies.csv (cited in Sources) is in the working
@@ -131,7 +149,7 @@ class Data_Processor():
 
 			else:
 				individual_currency_vol.append(volume)
-				self.log.info(" Appending volume to indiv company list.")
+				self.log.info(" Appending volume to indiv. company list.")
 				i += 1
 
 		self.log.info(" Appending indiv. company volumes to list.")
@@ -147,13 +165,11 @@ class Data_Processor():
 		'''
 
 		for i, company in enumerate(volumes):	
-			self.log.debug('COMPANY: {}'.format(company))
 			length = len(company)
 			# sample size is 95, labels use 5, so 100
 			remainder = length % sample_and_label_size
 			# subtract remainder number of volumes off company
 			del company[length - remainder : length]
-			self.log.debug('POST COMPANY: {}'.format(company))
 
 		inds_to_delete = []
 		for i, company in enumerate(volumes):	
@@ -171,7 +187,7 @@ class Data_Processor():
 	# (passed by reference)
 	def label_data(self, volumes, sample_and_label_size, label_size):
 		''' Volumes will be passed in the format which has been separated by
-		company into lists which are all evenly divisible by 100. 
+		company into lists which are all evenly divisible by 100. (clean_data)
 		***volumes is also modified by this function***
 		'''
 		# make list of lable indices that we will delete from
@@ -191,7 +207,7 @@ class Data_Processor():
 				if ((row + 1) % sample_and_label_size) == 0:
 					for each in range(label_size):
 						# Fill labels list with last five datapoints of that 100
-						label.append(data)	
+						label.append(data - each)	
 						inds_to_delete.append((lst, row - each))
 			# Append the ind comp label list to the labels list
 			labels.append(label)
@@ -318,23 +334,38 @@ class Data_Processor():
 			del labels[ind]
 		return (samples, labels)
 
-	#XXX
-	#def average_nans(self, samples, labels):
 	def average_nans(self, lst):
-		''' Input must be after labels w/ all nans were deleted. '''
-		df = pd.DataFrame(lst)	
-		df.fillna(df.mean()).astype(float)
-		lst = df.values.tolist()
-		#assert(isinstance(all(lst), float))
-		
+		#''' Input must be after labels w/ all nans were deleted. '''
+		''' Input must be lst -- not jagged! This function loops through
+		all samples and replaces nans with the average of the funciton. If
+		they're all nans then.... #XXX
+		 '''
+		# turn into a numpy array
+		for sample in lst:
+			arr = np.asarray(sample)
+			# find average value of the lst not including nans 
+			len_excluding_nans = (len(arr) - np.isnan(arr).sum())
+			average = np.nansum(arr) / len_excluding_nans
+			# replace nans with avg
+			for i, sample_val in enumerate(sample):
+				if math.isnan(sample_val):
+					sample[i] = average
+		self.find_nans(lst)
+		return lst
+
+	def find_nans(self, lst):
 		for j, sample in enumerate(lst):
 			for i, sample_val in enumerate(sample):
-				if sample_val == float("NaN"):
-					import pdb; pdb.set_trace()
-					avg = sum(sample) / len(sample)
-					sample[i] = avg
-					#XXX Don't think that's necessary?
-					lst[j] = sample[sample]
+				if math.isnan(sample_val):
+					self.log.debug("FIND NAN FUNC")
+					#import pdb; pdb.set_trace()
+					sample[i] = 1.0
+
+	def replace_zeroes(self, lst):
+		for j, sample in enumerate(lst):
+			for i, sample_val in enumerate(sample):
+				if sample_val == 0:
+					lst[j][i] = 1.0
 		return lst
 					
 	def map_indices(self, volumes):
@@ -372,130 +403,61 @@ class Data_Processor():
 		#plt.figure(table)
 		#plt.show(table)
 		#self.log.info(volumes.head())
+
+	def save_train_test_samples(self, train_test_samples, name):
+		'''
+		Args:
+			train_test_samples: This can actually be any python object you
+				want to save, not just train_test_samples
+			name: How you want to name the file you save to object to. Should
+				end in .pkl
+
+		pkl or pickle is a Python model which can turn a Python object
+		to a byte stream. '''
+
+		# 'wb' means writing to the file in binary, which pickle does
+		with open(name, 'wb') as f:
+			pickle.dump(train_test_samples, f, pickle.DEFAULT_PROTOCOL)
+			f.close()
+
+	def load_train_test_samples(self, name):
+		''' name should end in .pkl '''
+		try:
+			with open (name, 'rb') as f:
+				obj = pickle.load(f)
+				f.close()
+		except FileNotFoundError as e:
+			self.log.critical(
+				'You have not processed and saved the data yet!' +\
+				'\n Try changing the "load_processing" parameter to False ' +\
+				' in parameters.py! \n'
+				)
+		return obj
 				
 	# Chains together all the functions necessary to process the data
 	def main(
 		self, sample_and_label_size, label_size, 
 		sample_size, train_fraction):
 
-		df = self.get_df()
-		crypto_rows = self.get_segmented_data(df)
-		volumes = self.get_volumes(df, crypto_rows)
-		cleaner_volumes = self.clean_data(volumes, sample_and_label_size)
-		labels = self.label_data(
-			cleaner_volumes, sample_and_label_size, label_size)
-
-		labels_samples = self.get_samples(labels, label_size)
-		samples = self.get_samples(cleaner_volumes, sample_size)
-		labels_samp = self.average_nans(labels_samples)
-		samp = self.average_nans(samples)
-		samples_dict = self.get_train_test_samples(
-			samp, labels_samp, train_fraction)
-		import pdb; pdb.set_trace()
+		if p['load_processing'] == True:
+			samples_dict = self.load_train_test_samples(p['obj_filename'])
+		else:
+			df = self.get_df()
+			crypto_rows = self.get_segmented_data(df)
+			volumes = self.get_volumes(df, crypto_rows)
+			cleaner_volumes = self.clean_data(volumes, sample_and_label_size)
+			labels = self.label_data(
+				cleaner_volumes, sample_and_label_size, label_size)
+			labels_samples = self.get_samples(labels, label_size)
+			samples = self.get_samples(cleaner_volumes, sample_size)
+			labels_samp = self.average_nans(labels_samples)
+			samp = self.average_nans(samples)
+			samples_dict = self.get_train_test_samples(
+				samp, labels_samp, train_fraction)
+			self.save_train_test_samples(samples_dict, p['obj_filename'])
+				
 		return samples_dict
 		
-#--------------------------------------MOVED TO OTHER FILES---------------------
-#class Crypto_Net(nn.Module):
-#	def __init__(self, n_input, n_hidden, n_output):
-#		# Very important to super so you can override forward later
-#		#XXX some nets are written this Python 2 way, not sure why
-#		#super(Crypto_Net, self).__init__()
-#		super().__init__()
-#		# Define the architecture
-#		self.net = nn.Sequential(
-#			# Layers 1 and 2 with 95 inputs, 20 outputs
-#			nn.Linear(n_input, n_hidden),
-#			# Activation function
-#			nn.ReLU(),
-#			# Layers 2 and 3 with 20 inputs 5 outputs
-#			nn.Linear(n_hidden, n_output)
-#			)
-#
-#	def forward(self, volumes_sample):
-#		x = self.net(volumes_sample)
-#		return x
-#
-## Parameters
-#p = {'n_input' : 95, 'n_hidden' : 20, 'n_output' : 5, 
-#	'lr' : 0.001, 'epochs' : 5
-#	}
-#
-###dp = Data_Processor('./all_currencies.csv')
-##df = dp.get_df()
-###XXX put in parameters dict?
-##sample_and_label_size = 100
-##sample_size = 95
-##label_size = 5
-##seg_data = dp.get_segmented_data(df)
-##volumes = dp.get_volumes(df, seg_data)
-##cleaned_vols = dp.clean_data(volumes, sample_and_label_size)
-##labels = dp.label_data(cleaned_vols, sample_and_label_size, label_size)
-##samples = dp.get_samples(cleaned_vols, sample_size)
-###train_samples = 
-###train_labels = 
-###test_samples = 
-###test_labels = 
-#
-## Constructs layers, weights, biases, activation funcs etc...
-#model = Crypto_Net(p['n_input'], p['n_hidden'], p['n_output'])
-## Loss func and method of gradient descent
-#criterion = nn.MSELoss()
-#optimizer = torch.optim.SGD(model.parameters(), lr = p['lr'])
-#
-#def train(p, model, criterion, optimizer, samples, labels):
-#	'''
-#	Args:
-#		p: dict containing params subject to change like epoch number
-#		model: made in Crypto_Net, architechture/neurons to pass data through
-#		criterion: this is a loss function; the type of error calculation
-#		optimizer: this is the type of gradient descent (ie stochastic...)
-#	NOTE: criterion, optimizer, train_loader all are pytorch objects
-#	'''
-#	# epoch is one full pass through dataset
-#	for epoch in range(p['epochs']):
-#		for sample, target in zip(samples, labels):
-#			# Forward pass for each batch of volumes stored in train_loader
-#			model_output = model(sample)
-#			loss = criterion(model_output, target)
-#			# Backpropagation of error
-#			optimizer.zero_grad()
-#			# computes new grad
-#			loss.backward()
-#			# update weights
-#			optimizer.step()
-#
-#			if (i+1) % 100 == 0:
-#				print ('Epoch [{}/{}], Step [{}/{}], Loss: {:.4f}'.format(
-#					epoch+1, num_epochs, i+1, total_step, loss.item()))
-#
-#def test(p, test_samples, test_labels):
-#	'''
-#	This func gets runs some unused data through and shows the average error.
-#	Args:
-#	'''
-#	i = 0
-#	every_fifth_i = 0
-#	total_error = 0
-#	# No gradient computed for testing since we aren't updating weights
-#	with torch.no_grad():
-#		for sample, label in zip(samples, labels):
-#			model_output = model(data)
-#			if (i + 1) % 5:
-#				error = get_accuracy(model_output, target)
-#				total_error += error
-#				avg_acc = get_avg_acc(total_error, every_fifth_i)
-#				print('AVERAGE NETWORK ERROR, in dollars: {}'.format(avg_acc))
-#				every_fifth_i += 1
-#			i += 1
-#
-#def get_accuracy(model_output, target):
-#	error = model_output - target
-#	return error
-#
-#def get_avg_acc(total_error, i):
-#	average_error = total_error / (i + 1)
-#	return average_error
-
 #---------------------Other method of loading data---------------------
 #class Data(Dataset):
 #	def __init__(self):
@@ -572,39 +534,9 @@ class Data_Processor():
 #				print('AVERAGE NETWORK ERROR, in dollars: {}'.format(avg_acc))
 #				j += 1
 #			i += 1
-			
-			
-#def initialize():
-#	#XXX random numbers of nodes right now,
-#	# INPUT should be as many past volumes as desired for processing
-#	# HIDDEN can be messed with but probably should be less than input since
-#	# you want to sort of generalize the trend
-#	# OUTPUT should be 1 prediction of the average volume of the next three 
-#	# data points
-#	n_input, n_hidden, n_output = 5, 3, 1
-#	#XXX n is batch size which is sample size for a sampling dist
-#	# so probably like 250 volumes per sample?
-#	n = 1
-#	#XXX not sure why the double parens
-#	# x should be from dataloader which should load from the volumes scraped
-#	x = torch.randn(n, n_input)
-#	# y should be the labeled data to compute error with (actual next company
-#	# volumes)
-#	y = torch.randn(n, n_output)
-#	print('y tensor: ' + str(y))
-#	#XXX weights and biases are automatically set by making Linear(...)
-#	# Randomizing the weights with the proper dimensions
-#	#w1 = torch.randn(n_input, n_hidden)
-#	#w2 = torch.randn(n_hidden, n_output)
-#	# Random biases as well
-#	#b1 = torch.randn(1, n_hidden)
-#	#b2 = torch.randn(1, n_output)
-#	print('bias layer 2: ' + str(b2))
-#	learning_rate = 1e-6
 
 if __name__ == '__main__':
 	pass
 	#data_loader = Data_Processor('./all_currencies.csv')
 	#data_loader.main()
-	#initialize()
 

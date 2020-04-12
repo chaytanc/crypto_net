@@ -55,19 +55,19 @@ class Test_NN(unittest.TestCase):
 		fake_volumes = [[0, 1, 2, 3], [4, 5], [6, 7, 8, 9, 10, 11]]
 		sample_and_label_size = 3
 		cleaned = self.dp.clean_data(fake_volumes, sample_and_label_size)
-		assert(cleaned == [[0, 1, 2,], [6, 7, 8, 9, 10, 11]])
+		assert(cleaned == [[0, 1, 2], [6, 7, 8, 9, 10, 11]])
 
 	def test_label_data_400(self):
 		self.log.debug("\n TEST 400 \n")
 		fake_volumes = [[0, 1, 2, 3], [4, 5], [6, 7, 8, 9, 10, 11]]
 		sample_and_label_size = 3
-		label_size = 1
+		label_size = 2
 		# Cleaned data will look like: [[0, 1, 2], [6, 7, 8, 9, 10, 11]] 
 		cleaned = self.dp.clean_data(fake_volumes, sample_and_label_size)
 		labels = self.dp.label_data(
 			cleaned, sample_and_label_size, label_size)
-		assert(labels == [[2], [8, 11]])
-		assert(fake_volumes == [[0, 1], [6, 7, 9, 10]])
+		assert(labels == [[2, 1], [8, 7, 11, 10]])
+		assert(fake_volumes == [[0], [6, 9]])
 
 	def test_map_indices_500(self):
 		self.log.debug("\n TEST 500 \n")
@@ -90,11 +90,11 @@ class Test_NN(unittest.TestCase):
 
 	def test_get_samples_800(self):
 		self.log.debug("\n TEST 800 \n")
-		fake_data = [[0, 1], [2], [3, 4, 5]]	
-		size = 1
+		fake_data = [[0, 1, 2, 3], [4, 5], [6, 7]]	
+		size = 2
 		samples = self.dp.get_samples(fake_data, size)	
 		self.log.debug("SAMPLES TEST: {}".format(samples))
-		assert(samples == [[0], [1], [2], [3], [4], [5]])
+		assert(samples == [[0, 1], [2, 3], [4, 5], [6, 7]])
 
 	#XXX Make fake_data be processed already rather than calling 
 	# the processing funcs
@@ -125,28 +125,49 @@ class Test_NN(unittest.TestCase):
 		assert(len(samples_dict['test_samples']) == 2)
 		assert(len(samples_dict['test_labels']) == 2)
 
+#	def test_train_1000(self):
+#		self.log.debug("\n TEST 1000 \n")
+#		fake_samples = [[0, 1, 2], [4, 5, 6]]
+#		fake_labels = [[3], [7]] 
+#		samples_dict = self.dp.get_train_test_samples(
+#			fake_samples, fake_labels, 1)	
+#		fake_p = {'n_input' : 3, 'n_hidden1' : 20, 'n_output' : 1, 
+#			'lr' : 0.001, 'epochs' : 25, 'sample_and_label_size' : 4, 
+#			'label_size' : 1, 'sample_size' : 3, 'train_fraction' : 1
+#		}
+#		
+#		model = nn.Crypto_Net(
+#			fake_p['n_input'], fake_p['n_hidden1'], fake_p['n_output'])
+#		criterion = torch.nn.MSELoss()
+#		optimizer = torch.optim.SGD(model.parameters(), lr = fake_p['lr'])
+#		train_samples = samples_dict['train_samples']
+#		train_labels = samples_dict['train_labels']
+#
+#		try:
+#			start.train(
+#				fake_p, model, criterion, optimizer, 
+#				train_samples, train_labels
+#				)
+#			# Success!
+#			self.log.debug("TRAIN SUCCESS!")
+#			status = True
+#			assert(True)
+#		except Exception as e:
+#			self.log.debug("ERROR: {}".format(e))
+#			status = False
+#			assert(False)
+#
+#		return status
+
 	def test_train_1000(self):
 		self.log.debug("\n TEST 1000 \n")
-		fake_samples = [[0, 1, 2], [4, 5, 6]]
-		fake_labels = [[3], [7]] 
-		samples_dict = self.dp.get_train_test_samples(
-			fake_samples, fake_labels, 1)	
-		fake_p = {'n_input' : 3, 'n_hidden' : 20, 'n_output' : 1, 
-			'lr' : 0.001, 'epochs' : 25, 'sample_and_label_size' : 4, 
-			'label_size' : 1, 'sample_size' : 3, 'train_fraction' : 1
-		}
-		
-		model = nn.Crypto_Net(
-			fake_p['n_input'], fake_p['n_hidden'], fake_p['n_output'])
-		criterion = torch.nn.MSELoss()
-		optimizer = torch.optim.SGD(model.parameters(), lr = fake_p['lr'])
-		train_samples = samples_dict['train_samples']
-		train_labels = samples_dict['train_labels']
+		data_path = './test_volumes.csv'
+		train_loader, test_loader = start.get_data(data_path, logging.DEBUG)
 
 		try:
 			start.train(
 				fake_p, model, criterion, optimizer, 
-				train_samples, train_labels
+				train_loader
 				)
 			# Success!
 			self.log.debug("TRAIN SUCCESS!")
@@ -156,38 +177,51 @@ class Test_NN(unittest.TestCase):
 			self.log.debug("ERROR: {}".format(e))
 			status = False
 			assert(False)
-
 		return status
 
-	def test_test_1100(self):
-		self.log.debug("\n TEST 1100 \n")
-		fake_samples = [[10, 11, 12], [14, 15, 16]]
-		fake_labels = [[13], [17]] 
-		fake_p = {'n_input' : 3, 'n_hidden' : 20, 'n_output' : 1, 
-			'lr' : 0.001, 'epochs' : 25, 'sample_and_label_size' : 4, 
-			'label_size' : 1, 'sample_size' : 3, 'train_fraction' : 0
-		}
-		model = nn.Crypto_Net(
-			fake_p['n_input'], fake_p['n_hidden'], fake_p['n_output'])
-		criterion = torch.nn.MSELoss()
-		samples_dict = self.dp.get_train_test_samples(
-			fake_samples, fake_labels, fake_p['train_fraction'])	
-		test_samples = samples_dict['test_samples']
-		test_labels = samples_dict['test_labels']
+#	def test_test_1100(self):
+#		self.log.debug("\n TEST 1100 \n")
+#		fake_samples = [[10, 11, 12], [14, 15, 16]]
+#		fake_labels = [[13], [17]] 
+#		fake_p = {'n_input' : 3, 'n_hidden1' : 20, 'n_output' : 1, 
+#			'lr' : 0.001, 'epochs' : 25, 'sample_and_label_size' : 4, 
+#			'label_size' : 1, 'sample_size' : 3, 'train_fraction' : 0
+#		}
+#		model = nn.Crypto_Net(
+#			fake_p['n_input'], fake_p['n_hidden1'], fake_p['n_output'])
+#		criterion = torch.nn.MSELoss()
+#		samples_dict = self.dp.get_train_test_samples(
+#			fake_samples, fake_labels, fake_p['train_fraction'])	
+#		test_samples = samples_dict['test_samples']
+#		test_labels = samples_dict['test_labels']
+#
+#		try:
+#			start.test(fake_p, model, criterion, test_samples, test_labels)
+#			self.log.debug("TEST SUCCESS!")
+#			status = True
+#			assert(True)
+#
+#		except Exception as e:
+#			self.log.debug("ERROR: {}".format(e))
+#			status = False
+#			assert(False)
+#
+#		return status
+#
+	def test_replace_zeroes_1200(self):
+		self.log.debug("\n TEST 1200 \n")
+		fake_samples = [[10, 0, 12], [14, 15, 16]]
+		fake_samp = self.dp.replace_zeroes(fake_samples)	
+		self.log.debug(fake_samp)
+		assert(fake_samp == [[10, 1.0, 12], [14, 15, 16]])
 
-		try:
-			start.test(fake_p, model, criterion, test_samples, test_labels)
-			self.log.debug("TEST SUCCESS!")
-			status = True
-			assert(True)
-
-		except Exception as e:
-			self.log.debug("ERROR: {}".format(e))
-			status = False
-			assert(False)
-
-		return status
-
+	def test_average_nans_1300(self):
+		self.log.debug("\n TEST 1300 \n")
+		fake_samples = [[float('nan'), 4.0, float('nan')], 
+			[float('nan'), 8.0, 9.0]]
+		fake_samples = self.dp.average_nans(fake_samples)
+		self.log.debug("AVGD NaNs: {}".format(fake_samples))
+		assert(fake_samples == [[4.0, 4.0, 4.0], [8.5, 8.0, 9.0]])
 			
 	def tearDown(self):
 		pass
