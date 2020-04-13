@@ -9,7 +9,9 @@ p = {
 		'sample_and_label_size' : 100, 
 		'label_size' : 5, 'sample_size' : 95, 'train_fraction' : 0.9,
 		'log_file' : './log.log', 'type' : 'deep', 'load_processing' : True,
-		'obj_filename' : 'samples_dict.pkl'
+		'obj_filename' : 'samples_dict.pkl', 
+		'stats_output_file' : './stats.csv', 'overwrite_stats' : False,
+		'dropout_prob' : 0.2
 	}
 
 

@@ -124,7 +124,7 @@ class Data_Processor():
 
 		self.log.info(' Getting the all the volumes and putting them into a' +\
 			' separate list for each different currency.')
-		all_currency_vol = []
+		volumes = []
 		individual_currency_vol = []
 		# abs_iterations increments with each new company, i increments
 		# with each volume added to a company, representing which row is 
@@ -139,7 +139,7 @@ class Data_Processor():
 			if(i == crypto_rows[company_i]):
 
 				self.log.info(" Appending indiv. company volumes to list.")
-				all_currency_vol.append(individual_currency_vol)
+				volumes.append(individual_currency_vol)
 				# Clears the individual currency volume list when a new
 				# company is found THEN appends the next volume
 				individual_currency_vol = []
@@ -153,10 +153,9 @@ class Data_Processor():
 				i += 1
 
 		self.log.info(" Appending indiv. company volumes to list.")
-		all_currency_vol.append(individual_currency_vol)
-		return all_currency_vol
+		volumes.append(individual_currency_vol)
+		return volumes
 	
-	#XXX make all_currency_vol and volumes be the same words
 	def clean_data(self, volumes, sample_and_label_size):
 		''' This function will trim each company's data so that it is divisible
 		by your batchsize and label size combined. 
@@ -182,6 +181,34 @@ class Data_Processor():
 			del volumes[ind]
 
 		return volumes
+
+	def normalize_data(self, samples, norm=True):
+		''' 
+		min/max normalization to a scale of 0-1 
+		Args:
+			samples: any format of the data with 2 dimensions
+			norm: Setting this to true usings normalization. Anything else uses
+				the inverse function to unnormalize. 
+		'''
+		new_samples = []
+		# In this case it is okay to operate on the list we are iterating over
+		# since we don't change the indexes or any upcoming samples
+		for i, sample in enumerate(samples):
+			max_sample_val = max(sample)
+			min_sample_val = min(sample)
+			new_sample = []
+			for j, sample_val in enumerate(sample):
+				if norm == True:
+					new_sample_val = (
+						sample_val - min_sample_val) / max_sample_val
+				# Unnormalizing data
+				else:
+					new_sample_val = (
+						sample_val * max_sample_val) + min_sample_val
+				new_sample.append(new_sample_val)
+			new_samples.append(new_sample)
+		self.log.info('(UN?)NORMALIZED SAMPLES: {}'.format(new_samples))
+		return new_samples
 
 	#XXX IT IS MISLEADING to only return labels since it ALSO changes volumes
 	# (passed by reference)
@@ -289,7 +316,6 @@ class Data_Processor():
 		self.log.debug("TRAIN_INDS: {}".format(train_inds))
 		self.log.debug("TEST_INDS: {}".format(test_inds))
 		for ind in train_inds:
-			self.log.debug("TRAIN IND: {}".format(ind))
 			train_samples.append(samples[ind])
 			train_labels.append(labels[ind])
 		
@@ -427,6 +453,7 @@ class Data_Processor():
 				obj = pickle.load(f)
 				f.close()
 		except FileNotFoundError as e:
+			obj = None
 			self.log.critical(
 				'You have not processed and saved the data yet!' +\
 				'\n Try changing the "load_processing" parameter to False ' +\
@@ -436,7 +463,7 @@ class Data_Processor():
 				
 	# Chains together all the functions necessary to process the data
 	def main(
-		self, sample_and_label_size, label_size, 
+		self, p, sample_and_label_size, label_size, 
 		sample_size, train_fraction):
 
 		if p['load_processing'] == True:
@@ -446,15 +473,18 @@ class Data_Processor():
 			crypto_rows = self.get_segmented_data(df)
 			volumes = self.get_volumes(df, crypto_rows)
 			cleaner_volumes = self.clean_data(volumes, sample_and_label_size)
+			normalized_volumes = self.normalize_data(cleaner_volumes, norm=True)
 			labels = self.label_data(
-				cleaner_volumes, sample_and_label_size, label_size)
+				normalized_volumes, sample_and_label_size, label_size)
 			labels_samples = self.get_samples(labels, label_size)
-			samples = self.get_samples(cleaner_volumes, sample_size)
+			samples = self.get_samples(normalized_volumes, sample_size)
 			labels_samp = self.average_nans(labels_samples)
 			samp = self.average_nans(samples)
 			samples_dict = self.get_train_test_samples(
 				samp, labels_samp, train_fraction)
 			self.save_train_test_samples(samples_dict, p['obj_filename'])
+			#self.log.debug('PDB IN MAIN()')
+			#import pdb; pdb.set_trace()
 				
 		return samples_dict
 		

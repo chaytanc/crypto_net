@@ -7,14 +7,18 @@ from torch import autograd
 import torch.nn, torch.optim
 from torch.utils.data import DataLoader, Dataset
 from parameters import p
+import pandas as pd
 import logging
 import sys
+import os
+from datetime import datetime
+import json
 
 # Constructs layers, weights, biases, activation funcs etc...
 if p['type'] == 'simple':
-	model = Crypto_Net(p['n_input'], p['n_output'], p['n_hidden1'])
+	model = Crypto_Net(p, p['n_input'], p['n_output'], p['n_hidden1'])
 else:
-	model = Crypto_Net(
+	model = Crypto_Net(p, 
 		p['n_input'], p['n_output'], 
 		p['n_hidden1'], p['n_hidden2'], p['n_hidden3'], p['n_hidden4']
 		)
@@ -48,10 +52,10 @@ log = setup_logger(logging.DEBUG, p['log_file'])
 
 #---------------------Other method of loading data---------------------
 class Data(Dataset):
-	def __init__(self, data_path, logging_level, train_or_test):
+	def __init__(self, p, data_path, logging_level, train_or_test):
 		dp = Data_Processor(data_path, logging_level)
 		samples_dict = dp.main(
-			p['sample_and_label_size'], p['label_size'], 
+			p, p['sample_and_label_size'], p['label_size'], 
 			p['sample_size'], p['train_fraction'])
 
 		self.samples = samples_dict['{}_samples'.format(train_or_test)]
@@ -66,9 +70,9 @@ class Data(Dataset):
 		length = len(self.samples)
 		return length
 
-def get_data(data_path, logging_level):
-	train_data = Data(data_path, logging_level, 'train')
-	test_data =  Data(data_path, logging_level, 'test')
+def get_data(p, data_path, logging_level):
+	train_data = Data(p, data_path, logging_level, 'train')
+	test_data =  Data(p, data_path, logging_level, 'test')
 	train_loader = DataLoader(dataset=train_data, batch_size=1, shuffle=True)
 	test_loader = DataLoader(dataset=test_data, batch_size=1, shuffle=True)
 	return (train_loader, test_loader)
@@ -96,7 +100,6 @@ def train(p, model, criterion, optimizer, train_loader):
 				# update weights
 				optimizer.step()
 
-				#XXX mess w/ the 100 param, make a hyperparam
 				if (i+1) % 100 == 0:
 					log.info('Epoch [{}/{}], Step [{}/{}], Loss: {:.4f}'
 						.format(
@@ -112,11 +115,13 @@ def test(p, model, criterion, test_loader):
 	i = 0
 	every_fifth_i = 0
 	total_error = 0
+	total_loss = 0
 	# No gradient computed for testing since we aren't updating weights
 	with torch.no_grad():
 		for sample, label in test_loader:
 			model_output = model(sample)
 			loss = criterion(model_output, label)
+			total_loss += loss
 			if (i + 1) % 5:
 				error = get_accuracy(model_output, label)
 				total_error += error
@@ -129,6 +134,9 @@ def test(p, model, criterion, test_loader):
 				every_fifth_i += 1
 			i += 1
 
+	avg_loss = total_loss / len(test_loader)
+	write_stats_to_file(p, p['stats_output_file'], avg_loss, avg_err, model)
+
 def get_accuracy(model_output, target):
 	error = model_output - target
 	return error
@@ -137,14 +145,41 @@ def get_avg_error(total_error, i):
 	average_error = total_error / (i + 1)
 	return average_error
 
-#def write_stats_to_file(self, output_filename, loss, i, avg_err):
-#	with open(output_filename, 'w') as f:
-#		pd.DataFrame(	
+#XXX need to write the stats if it's the last iteration -- not every time
+# or can avg the loss and just write that at the end
+# also append model type and date/time and learning rate
+def write_stats_to_file(p, output_filename, avg_loss, avg_err, model):
+	stat_summary = {}
+	#XXX named_parameters or just parameters?
+	#for name, param in model.named_parameters():
+	#name, param = model.state_dict().items()
+	# Converts the dict of params into a string so that pandas doesn't screw up
+	#str_param = json.dumps(param)
+
+	# These are all wrapped in lists so that I can use orient='columns' which
+	# expects an iterable
+	stat_summary['Date'] = [datetime.now()]
+	stat_summary['Average Loss'] = [avg_loss]
+	stat_summary['Average Error'] = [avg_err]
+	stat_summary['Learning Rate'] = [p['lr']]
+	stat_summary['Model Type'] = [p['type']]
+	#stat_summary['Name'] = str(name)
+	#stat_summary['Parameters'] = str_param
+	# orient='columns' is default
+	df = pd.DataFrame.from_dict(stat_summary, orient='columns')
+
+	# If file already exists, need to append, else need to create new file
+	if os.path.exists(output_filename) and p['overwrite_stats'] == False:
+		with open(output_filename, 'a') as f:
+			df.to_csv(f, header=False)
+	else:
+		with open(output_filename, 'w') as f:
+			df.to_csv(f, header=True)
 
 if __name__ == "__main__":
 	data_path = './all_currencies.csv'
 	logging_level = logging.INFO
-	train_loader, test_loader = get_data(data_path, logging_level)
+	train_loader, test_loader = get_data(p, data_path, logging_level)
 	train(p, model, criterion, optimizer, train_loader)
 	test(p, model, criterion, test_loader)
 
