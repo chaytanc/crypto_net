@@ -11,7 +11,10 @@ fake_p = {
 		'log_file' : './log.log', 'type' : 'simple', 'load_processing' : False,
 		'obj_filename' : 'samples_dict.pkl', 
 		'stats_output_file' : './fake_stats.csv', 'overwrite_stats' : True,
-		'dropout_prob' : 0.2
+		'dropout_prob' : 0.2, 'tensorboard_dir' : './fake_tb',
+		'visualize' : True, 'load_model' : False, 
+		'model_filename' : 'model.pkl', 'train_iter_to_print_ratio' : 2,
+		'kmeans' : True, 'k_auto' : False, 'cluster_range' : range(1, 3)
 	}
 
 

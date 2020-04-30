@@ -20,19 +20,30 @@
 # Train
 # Test
 
+# K-Clustering Plan:
+	# stddev of companies after volumes data segmented by company
+	# attach as a tuple of stddev with company number
+	# compute k-cluster on stddevs
+	# segment/return clusters of companies based on stddevs/volatility
+	# train k number of models based on those clusters
+
 import torch
 from torch import nn, optim
 from torch.utils.data import Dataset, DataLoader
 import pandas as pd
 import numpy as np
+import matplotlib as mpl
+mpl.use('TkAgg')
 from matplotlib import pyplot as plt
 import os
 import logging
 import random
 import pickle
+import statistics
 from parameters import p
 import sys
 import math
+from sklearn.cluster import KMeans
 
 def setup_logger(logging_level, log_file):
 	''' Args: logger supports levels DEBUG, INFO, WARNING, ERROR, CRITICAL.
@@ -155,7 +166,170 @@ class Data_Processor():
 		self.log.info(" Appending indiv. company volumes to list.")
 		volumes.append(individual_currency_vol)
 		return volumes
+
+	def delete_empty_volumes(self, volumes):
+		''' 
+		This func deletes empty or 1-long volume lists 
+		Very similar to delete_empty_labels, but fuck it I just made another
+		instead of making the other more abstract.
+		'''
+		length = len(volumes[0])
+		inds_to_delete = []
+		for i, volume in enumerate(volumes):
+			if len(volume) <= 1:
+				inds_to_delete.append(i)	
 	
+		for ind in sorted(inds_to_delete, reverse=True):
+			del volumes[ind]
+		return volumes 
+
+	def get_std_devs(self, volumes):
+		''' This method assumes that the deviations will remain in the correct
+			order so that they correspond with the volumes they came from.
+		'''
+		devs = []
+		for company in volumes:
+			dev = statistics.stdev(company)
+			devs.append(dev)
+		return devs
+
+	def get_zipped_volumes_and_devs(self, volumes):
+		''' To plot standard deviation of a company against the average volume,
+		this function zips them together as a tuple. '''
+		devs = self.get_std_devs(volumes)
+		avg_vols = []
+		for company in volumes:
+			avg_vol = sum(company) / len(company)
+			avg_vols.append(avg_vol)
+		zipped_volumes = [[volume, dev] for volume, dev in zip(avg_vols, devs)]
+		return zipped_volumes
+	
+	# Non-deterministic, may not get same k every time so can't be tested 
+	# beyond just running on a small sample to check syntax etc...
+	def k_cluster(self, p, zipped_volumes, volumes):
+		''' 
+			K-Means Clustering mega-chain function
+			Args:
+				p: parameters dictionary
+				zipped_volumes: volumes and standard deviations combined in
+					the format z_v = [(volume, dev) ...] as seen in func
+					get_zipped_volumes_and_devs()
+		'''
+
+		numpy_zipped = np.asarray(zipped_volumes)
+		numpy_zipped.reshape(-1, 2)
+		k = self.get_k(p, numpy_zipped)
+		cluster_inds = self.get_cluster_inds(k, numpy_zipped)
+		self.log.debug('VOLUMES in k_cluster(): {}'.format(volumes))
+		vol_clusters = self.group_volumes_by_cluster(volumes, cluster_inds, k)
+		
+		return vol_clusters
+
+	def get_k(self, p, zipped_volumes):
+		# Format range(1 , 4) would have possible clusters 1, 2, or 3
+		possible_cluster_range = p['cluster_range']
+		possible_clusters = [x for x in possible_cluster_range] 
+		
+		sum_of_squares = []
+		# possible clusters should be list range object like [1,5]
+		# Iterates over possible number of clusters and then calculates which
+		# is at the elbow of the curve which should be the correct k value
+		for each in possible_clusters:
+			# Setup the algorithm
+			# Uses init='k_means++' which sets initial centroids not randomly
+			kmeans = KMeans(n_clusters = each, n_init=13, max_iter=400)
+			# Cluster
+			self.log.debug("ZIPPED VOLUMES: {}".format(zipped_volumes))
+			kmeans.fit(zipped_volumes)
+			# Inertia is the sum of squared distance from centroid
+			sum_of_squares.append(kmeans.inertia_)
+		# Display elbow graph or auto calc
+		k = self.calculate_k(p, possible_clusters, wcss=sum_of_squares)
+		assert(k != 0)
+		return k
+
+	def calculate_k(self, p, possible_clusters, wcss):
+		plt.title('K-Means Clustering Sum Squared Error Over n Clusters')
+		plt.xlabel('Num Clusters')
+		plt.ylabel('Sum of Sqaured Centroid Distance (WCSS)')
+		plt.plot(possible_clusters, wcss)
+		plt.show()
+		# prompt user in terminal for k-means value
+		if p['k_auto'] == False:
+			k = input("At how many clusters is the elbow of the graph located?")
+		else:
+			slopes = self.get_slopes(possible_clusters, wcss)
+			k = self.get_auto_k(slopes)
+		return int(float(k))
+
+	def get_slopes(self, possible_clusters, wcss):
+		slopes = []
+		for i, (x, y) in enumerate(zip(possible_clusters, wcss)):
+			self.log.debug("ITERATION in get_slopes: {}".format(i))
+			if i != (len(wcss) - 1):
+				x2 = possible_clusters[i + 1]
+				y2 = wcss[i + 1]
+				delta_y = y - y2
+				delta_x = x - x2
+				slope = delta_y / delta_x	
+				slopes.append((i, slope))
+		return slopes
+
+	def get_auto_k(self, slopes):
+		# Most negative slope, one that reduces error most is where k is
+		#NOTE k will be 0 if min_slope is not updated
+		min_slope = [-1, 100000000000000000000000000]
+		# Need to iterate double to get full sort
+		#NOTE this finna take a WHILE for a fat dataset like mine. Just show 
+		# elbow graph instead lowkey
+		for each in slopes:
+			for also_each in slopes:
+				if also_each[1] < min_slope[1]:
+					min_slope[0] = also_each[0]
+					min_slope[1] = also_each[1]
+		# Need to add one because it is the cluster at x2, y2, not the i of x, y
+		k = min_slope[0] + 1
+		return k
+
+	def get_cluster_inds(self, k, zipped_volumes):
+		''' zipped_volumes is (volume, dev) '''
+		# Use value of k to cluster the points
+		kmeans = KMeans(n_clusters = k)
+		# Compute cluster centers and get indices
+		# fit_predict returns the index  of the cluster from the 
+		# range of possible clusters. Ex: data = [(1,2), (2,3), (100, 300)]
+		# and you have two clusters, then fit_predict returns [0, 0, 1]
+		cluster_indices = kmeans.fit_predict(zipped_volumes)
+		return cluster_indices
+
+	def group_volumes_by_cluster(self, volumes, cluster_indices, k):
+		# Get points based on which cluster they're in
+		# Fill with each cluster which will contain the indices of the 
+		# companies that belong to the cluster
+
+		# Each cluster will be a list within vol_clusters and will contain
+		# the volumes
+		vol_clusters = []
+		# 
+		cluster_dict = {}
+		# Make k number of cluster lists which we will append to
+		for n in range(k):
+			cluster_dict['cluster' + str(n)] = []
+
+		# Loop through volumes
+		for i, volume in enumerate(volumes):
+			# For each i, find cluster it belongs to and append to correct list
+			clust_n = cluster_indices[i]
+			cluster_dict['cluster' + str(clust_n)].append(volume)
+	
+		# Assign cluster_dict lists to vol_clusters?
+		for key, value in cluster_dict.items():
+			vol_clusters.append(value)
+
+		return vol_clusters
+
+	#def visualize_clusters(self, std_devs, kmeans, k):
+
 	def clean_data(self, volumes, sample_and_label_size):
 		''' This function will trim each company's data so that it is divisible
 		by your batchsize and label size combined. 
@@ -271,7 +445,6 @@ class Data_Processor():
 					sample = []
 		return samples
 
-	#XXX shorten this?
 	def get_train_test_samples(self, samples, labels, train_fraction):
 		'''
 		Args:
@@ -294,6 +467,7 @@ class Data_Processor():
 		train_labels = []
 		test_samples = []
 		test_labels = []
+		#NOTE RANDOM SAMPLING OCCURS HERE
 		# Randomly sample n training samples and n test samples
 		# train_ind = [(ind, val)] format
 		train_set = random.sample(samples_inds, n_train)
@@ -308,13 +482,9 @@ class Data_Processor():
 			if ind not in train_inds:
 				test_inds.append(ind)
 
-		#XXX FOR TESTING:
-		self.log.debug("LEN SAMPLES, LEN LABELS: {}, {}".format(
-			len(samples), len(labels)))
+		#NOTE FOR TESTING:
 		assert(len(samples) == len(labels))
 
-		self.log.debug("TRAIN_INDS: {}".format(train_inds))
-		self.log.debug("TEST_INDS: {}".format(test_inds))
 		for ind in train_inds:
 			train_samples.append(samples[ind])
 			train_labels.append(labels[ind])
@@ -348,7 +518,9 @@ class Data_Processor():
 		return new_array
 
 	def delete_empty_labels(self, samples, labels):
-		''' Inputs must be tensors! '''
+		''' This func deletes both the sample and the label if a label full of
+			nans is found.
+			Samples and label inputs must be tensors! '''
 		length = len(labels[0])
 		inds_to_delete = []
 		for i, label in enumerate(labels):
@@ -384,7 +556,6 @@ class Data_Processor():
 			for i, sample_val in enumerate(sample):
 				if math.isnan(sample_val):
 					self.log.debug("FIND NAN FUNC")
-					#import pdb; pdb.set_trace()
 					sample[i] = 1.0
 
 	def replace_zeroes(self, lst):
@@ -460,6 +631,19 @@ class Data_Processor():
 				' in parameters.py! \n'
 				)
 		return obj
+
+	def post_volumes_processing(self, p, volumes):
+		cleaner_volumes = self.clean_data(volumes, p['sample_and_label_size'])
+		normalized_volumes = self.normalize_data(cleaner_volumes, norm=True)
+		labels = self.label_data(
+			normalized_volumes, p['sample_and_label_size'], p['label_size'])
+		labels_samples = self.get_samples(labels, p['label_size'])
+		samples = self.get_samples(normalized_volumes, p['sample_size'])
+		labels_samp = self.average_nans(labels_samples)
+		samp = self.average_nans(samples)
+		samples_dict = self.get_train_test_samples(
+			samp, labels_samp, p['train_fraction'])
+		return samples_dict
 				
 	# Chains together all the functions necessary to process the data
 	def main(
@@ -472,21 +656,23 @@ class Data_Processor():
 			df = self.get_df()
 			crypto_rows = self.get_segmented_data(df)
 			volumes = self.get_volumes(df, crypto_rows)
-			cleaner_volumes = self.clean_data(volumes, sample_and_label_size)
-			normalized_volumes = self.normalize_data(cleaner_volumes, norm=True)
-			labels = self.label_data(
-				normalized_volumes, sample_and_label_size, label_size)
-			labels_samples = self.get_samples(labels, label_size)
-			samples = self.get_samples(normalized_volumes, sample_size)
-			labels_samp = self.average_nans(labels_samples)
-			samp = self.average_nans(samples)
-			samples_dict = self.get_train_test_samples(
-				samp, labels_samp, train_fraction)
-			self.save_train_test_samples(samples_dict, p['obj_filename'])
-			#self.log.debug('PDB IN MAIN()')
+			new_volumes = self.delete_empty_volumes(volumes)
+			if p['kmeans'] == True:
+				zipped_volumes = self.get_zipped_volumes_and_devs(new_volumes)
+				vol_clusters = self.k_cluster(p, zipped_volumes, new_volumes)
+				samples_dict = {}
+				for i, cluster in enumerate(vol_clusters):
+					p['obj_filename'] = 'processed_cluster' + str(i) + '.pkl'
+					indiv_sample_dict = self.post_volumes_processing(p, cluster)
+					samples_dict[str(i)] = indiv_sample_dict
+					self.save_train_test_samples(
+						samples_dict, p['obj_filename'])
+			else:
+				samples_dict = self.post_volumes_processing(p, new_volumes)
+
+			#self.log.debug('PDB IN data_processor: main()')
 			#import pdb; pdb.set_trace()
-				
-		return samples_dict
+			return samples_dict
 		
 #---------------------Other method of loading data---------------------
 #class Data(Dataset):

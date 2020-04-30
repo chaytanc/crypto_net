@@ -7,5 +7,7 @@ def slices(path, out_path):
 	new = df.iloc[0:200]
 	print(new)
 	new.to_csv(out_path)
+	more = df.iloc[5000:5100]
+	more.to_csv(out_path, mode='a', header=False)
 
 slices('../docs/all_currencies.csv', 'test_volumes.csv')
